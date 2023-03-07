@@ -18,8 +18,12 @@
 package org.apache.kyuubi.session
 
 import java.util.Base64
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+
 import scala.collection.JavaConverters._
+
 import org.apache.hive.service.rpc.thrift._
+
 import org.apache.kyuubi.KyuubiSQLException
 import org.apache.kyuubi.client.KyuubiSyncThriftClient
 import org.apache.kyuubi.config.KyuubiConf
@@ -35,7 +39,7 @@ import org.apache.kyuubi.session.SessionType.SessionType
 import org.apache.kyuubi.sql.parser.server.KyuubiParser
 import org.apache.kyuubi.sql.plan.command.RunnableCommand
 import org.apache.kyuubi.util.{SignUtils, ThreadUtils}
-import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
+
 
 class KyuubiSessionImpl(
     protocol: TProtocolVersion,
@@ -122,6 +126,7 @@ class KyuubiSessionImpl(
       "engine-alive-probe-" + _engineSessionHandle)
     val task = new Runnable {
       override def run(): Unit = {
+        info(s"Checking Engine Aliveness")
         if (_client.getRemoteEngineBroken) {
           close()
         }
