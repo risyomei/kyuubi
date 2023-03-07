@@ -141,7 +141,9 @@ class KyuubiSyncThriftClient private (
     })
 
     try {
-      task.get()
+      var result = task.get()
+      warn(s"Mark 3: Finished task.get")
+      result
     } catch {
       case e: ExecutionException => throw e.getCause
       case e: Throwable => throw e
@@ -242,6 +244,10 @@ class KyuubiSyncThriftClient private (
     val resp = withLockAcquiredAsyncRequest(GetInfo(req))
     ThriftUtils.verifyTStatus(resp.getStatus)
     resp
+  }
+
+  def getRemoteEngineBroken: Boolean = {
+    remoteEngineBroken
   }
 
   def getTypeInfo: TOperationHandle = {

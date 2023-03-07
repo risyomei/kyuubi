@@ -87,6 +87,7 @@ object ThreadUtils extends Logging {
       executor.shutdown()
       try {
         executor.awaitTermination(shutdownTimeout, TimeUnit.MILLISECONDS)
+        info(s"shutdown successful")
       } catch {
         case e: InterruptedException =>
           warn(

@@ -18,11 +18,8 @@
 package org.apache.kyuubi.session
 
 import java.util.Base64
-
 import scala.collection.JavaConverters._
-
 import org.apache.hive.service.rpc.thrift._
-
 import org.apache.kyuubi.KyuubiSQLException
 import org.apache.kyuubi.client.KyuubiSyncThriftClient
 import org.apache.kyuubi.config.KyuubiConf
@@ -37,7 +34,8 @@ import org.apache.kyuubi.service.authentication.InternalSecurityAccessor
 import org.apache.kyuubi.session.SessionType.SessionType
 import org.apache.kyuubi.sql.parser.server.KyuubiParser
 import org.apache.kyuubi.sql.plan.command.RunnableCommand
-import org.apache.kyuubi.util.SignUtils
+import org.apache.kyuubi.util.{SignUtils, ThreadUtils}
+import java.util.concurrent.{ScheduledExecutorService, TimeUnit}
 
 class KyuubiSessionImpl(
     protocol: TProtocolVersion,
@@ -118,6 +116,20 @@ class KyuubiSessionImpl(
     runOperation(launchEngineOp)
   }
 
+  private var engineAliveThreadPool: ScheduledExecutorService = _
+  private def startSessionEngineAliveProbe(): Unit = {
+    engineAliveThreadPool = ThreadUtils.newDaemonSingleThreadScheduledExecutor(
+      "engine-alive-probe-" + _engineSessionHandle)
+    val task = new Runnable {
+      override def run(): Unit = {
+        if (_client.getRemoteEngineBroken) {
+          close()
+        }
+      }
+    }
+    engineAliveThreadPool.scheduleWithFixedDelay(task, 5, 5, TimeUnit.SECONDS)
+  }
+
   private[kyuubi] def openEngineSession(extraEngineLog: Option[OperationLog] = None): Unit =
     handleSessionException {
       withDiscoveryClient(sessionConf) { discoveryClient =>
@@ -154,6 +166,7 @@ class KyuubiSessionImpl(
             _client = KyuubiSyncThriftClient.createClient(user, passwd, host, port, sessionConf)
             _engineSessionHandle =
               _client.openSession(protocol, user, passwd, openEngineSessionConf)
+            startSessionEngineAliveProbe()
             logSessionInfo(s"Connected to engine [$host:$port]/[${client.engineId.getOrElse("")}]" +
               s" with ${_engineSessionHandle}]")
             shouldRetry = false
