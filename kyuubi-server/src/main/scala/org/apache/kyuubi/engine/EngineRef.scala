@@ -24,6 +24,8 @@ import scala.util.Random
 
 import com.codahale.metrics.MetricRegistry
 import com.google.common.annotations.VisibleForTesting
+import org.apache.spark.launcher.InProcessLauncher
+import org.apache.spark.launcher.SparkAppHandle
 
 import org.apache.kyuubi.{KYUUBI_VERSION, KyuubiSQLException, Logging, Utils}
 import org.apache.kyuubi.config.KyuubiConf
@@ -173,6 +175,98 @@ private[kyuubi] class EngineRef(
 
   private def create(
       discoveryClient: DiscoveryClient,
+      extraEngineLog: Option[OperationLog],
+      sparkInPlace: Boolean): (String, Int) = {
+
+    // Calling the original create method
+    if (!sparkInPlace) return create(discoveryClient, extraEngineLog)
+
+    // Get the engine address ahead if another process has succeeded
+    var engineRef = discoveryClient.getServerHost(engineSpace)
+    if (engineRef.nonEmpty) return engineRef.get
+
+    // Create a new Spark-Submit Thread with inProcessLauncher
+    conf.set(HA_NAMESPACE, engineSpace)
+    conf.set(HA_ENGINE_REF_ID, engineRefId)
+
+    // Do not use the builder, just using it's values..
+    val sparkProcessBuilder = new SparkProcessBuilder(appUser, conf, engineRefId, extraEngineLog)
+    val started = System.currentTimeMillis()
+    conf.set(KYUUBI_ENGINE_SUBMIT_TIME_KEY, String.valueOf(started))
+    conf.setIfMissing(SparkProcessBuilder.APP_KEY, defaultEngineName)
+
+    val mainClass: String = "org.apache.kyuubi.engine.spark.SparkSQLEngine";
+    val shortName: String = "spark"
+    KyuubiApplicationManager.tagApplication(engineRefId, shortName, Some("yarn"), conf)
+
+    val launcher = new InProcessLauncher()
+      .setMainClass(mainClass)
+      .setVerbose(true)
+
+    conf.getAll.foreach {
+      case (k, v) =>
+        launcher.addSparkArg(sparkProcessBuilder.convertConfigKey(k), v)
+    }
+
+    builder.mainResource.foreach { jar =>
+      launcher.setAppResource(jar)
+    }
+    launcher.addAppArgs("--proxy-user " + appUser)
+
+    Utils.tryLogNonFatalError {
+      val handle: SparkAppHandle = launcher.startApplication()
+      while (engineRef.isEmpty) {
+        if (handle.getState == SparkAppHandle.State.FAILED ||
+          handle.getState == SparkAppHandle.State.KILLED ||
+          handle.getState == SparkAppHandle.State.LOST) {
+          val error = handle.getError().get()
+          MetricsSystem.tracing { ms =>
+            ms.incCount(MetricRegistry.name(ENGINE_FAIL, appUser))
+            ms.incCount(MetricRegistry.name(ENGINE_FAIL, error.getClass.getSimpleName))
+          }
+          throw error
+        }
+
+        if (handle.getState == SparkAppHandle.State.FINISHED) {
+          Option(engineManager).foreach { engineMgr =>
+            engineMgr.getApplicationInfo(
+              builder.clusterManager(),
+              engineRefId,
+              Some(started)).foreach { appInfo =>
+              if (ApplicationState.isTerminated(appInfo.state)) {
+                MetricsSystem.tracing { ms =>
+                  ms.incCount(MetricRegistry.name(ENGINE_FAIL, appUser))
+                  ms.incCount(MetricRegistry.name(ENGINE_FAIL, "ENGINE_TERMINATE"))
+                }
+                throw new KyuubiSQLException(
+                  s"""
+                     |The engine application has been terminated. Please check the engine log.
+                     |ApplicationInfo: ${appInfo.toMap.mkString("(\n", ",\n", "\n)")}
+                     |""".stripMargin,
+                  builder.getError)
+              }
+            }
+          }
+        }
+
+        if (started + timeout <= System.currentTimeMillis()) {
+          val killMessage = engineManager.killApplication(builder.clusterManager(), engineRefId)
+          handle.stop()
+          MetricsSystem.tracing(_.incCount(MetricRegistry.name(ENGINE_TIMEOUT, appUser)))
+          throw KyuubiSQLException(
+            s"Timeout($timeout ms, you can modify ${ENGINE_INIT_TIMEOUT.key} to change it) to" +
+              s" launched $engineType engine with ${launcher.toString}. $killMessage",
+            builder.getError)
+        }
+        Thread.sleep(1000)
+        engineRef = discoveryClient.getEngineByRefId(engineSpace, engineRefId)
+      }
+    }
+    engineRef.get
+  }
+
+  private def create(
+      discoveryClient: DiscoveryClient,
       extraEngineLog: Option[OperationLog]): (String, Int) = tryWithLock(discoveryClient) {
     // Get the engine address ahead if another process has succeeded
     var engineRef = discoveryClient.getServerHost(engineSpace)
@@ -273,6 +367,10 @@ private[kyuubi] class EngineRef(
       extraEngineLog: Option[OperationLog] = None): (String, Int) = {
     discoveryClient.getServerHost(engineSpace)
       .getOrElse {
+        if (conf.get(ENGINE_TYPE) == s"SPARK_SQL" &&
+          conf.get(ENGINE_SPARK_INPLACE_LAUNCHER)) {
+          return create(discoveryClient, extraEngineLog, true)
+        }
         create(discoveryClient, extraEngineLog)
       }
   }

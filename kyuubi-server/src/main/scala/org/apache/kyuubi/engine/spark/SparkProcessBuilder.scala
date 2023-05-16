@@ -88,7 +88,7 @@ class SparkProcessBuilder(
    * - If the key is start with `hadoop.`, it will be prefixed with `spark.hadoop.`
    * - Otherwise, the key will be added a `spark.` prefix
    */
-  protected def convertConfigKey(key: String): String = {
+  def convertConfigKey(key: String): String = {
     if (key.startsWith("spark.")) {
       key
     } else if (key.startsWith("hadoop.")) {

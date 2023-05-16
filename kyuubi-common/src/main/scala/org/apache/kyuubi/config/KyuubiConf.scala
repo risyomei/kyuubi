@@ -2730,6 +2730,14 @@ object KyuubiConf {
       .stringConf
       .createOptional
 
+  val ENGINE_SPARK_INPLACE_LAUNCHER: ConfigEntry[Boolean] =
+    buildConf("kyuubi.engine.spark.inplace.launcher")
+      .doc("Use org.apache.spark.launcher.InProcessLauncher instead of ProcessBuilder to" +
+        "start backend engine")
+      .version("1.7.1-line")
+      .booleanConf
+      .createWithDefault(false)
+
   val ENGINE_SPARK_EVENT_LOGGERS: ConfigEntry[Seq[String]] =
     buildConf("kyuubi.engine.spark.event.loggers")
       .doc("A comma-separated list of engine loggers, where engine/session/operation etc" +
