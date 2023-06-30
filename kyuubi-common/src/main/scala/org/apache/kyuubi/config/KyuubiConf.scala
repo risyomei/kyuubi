@@ -2630,6 +2630,28 @@ object KyuubiConf {
       .stringConf
       .createOptional
 
+  val ENGINE_SPARK_INPROCESS_LAUNCHER: ConfigEntry[Boolean] =
+    buildConf("kyuubi.engine.spark.inprocess.launcher")
+      .doc("Use org.apache.spark.launcher.InProcessLauncher instead of ProcessBuilder to" +
+        "start backend engine")
+      .version("1.7.1-line-p1")
+      .booleanConf
+      .createWithDefault(false)
+
+  val ENGINE_SPARK_INPROCESS_LAUNCHER_EXTRA_CLASSPATH: OptionalConfigEntry[String] =
+    buildConf("kyuubi.engine.spark.inprocess.launcher.extra.classpath")
+      .doc("Specifies extra classpath for InProcessLauncher")
+      .version("1.7.1-line-p1")
+      .stringConf
+      .createOptional
+
+  val ENGINE_SPARK_INPROCESS_LAUNCHER_SHARED_CLASS_PREFIX: OptionalConfigEntry[String] =
+    buildConf("kyuubi.engine.spark.inprocess.launcher.shared.class.prefix")
+      .doc("Specifies prefixes of shared class for InProcessLauncher")
+      .version("1.7.1-line-p1")
+      .stringConf
+      .createOptional
+
   val ENGINE_SPARK_EVENT_LOGGERS: ConfigEntry[Seq[String]] =
     buildConf("kyuubi.engine.spark.event.loggers")
       .doc("A comma-separated list of engine loggers, where engine/session/operation etc" +
